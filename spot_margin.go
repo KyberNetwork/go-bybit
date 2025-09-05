@@ -3,7 +3,7 @@ package bybit_connector
 import (
 	"context"
 	"errors"
-	"github.com/bybit-exchange/bybit.go.api/handlers"
+	"github.com/KyberNetwork/go-bybit/handlers"
 	"net/http"
 )
 

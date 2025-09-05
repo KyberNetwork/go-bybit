@@ -2,7 +2,7 @@ package bybit_connector
 
 import (
 	"context"
-	"github.com/bybit-exchange/bybit.go.api/handlers"
+	"github.com/KyberNetwork/go-bybit/handlers"
 	"net/http"
 )
 
