@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -13,7 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type MessageHandler func(message string) error
+type MessageHandler func(message []byte) error
 
 func (b *WebSocket) handleIncomingMessages() {
 	for {
@@ -28,8 +30,12 @@ func (b *WebSocket) handleIncomingMessages() {
 				return
 			}
 
+			if b.handlePongMsg(message) {
+				continue
+			}
+
 			if b.onMessage != nil {
-				err := b.onMessage(string(message))
+				err := b.onMessage(message)
 				if err != nil {
 					fmt.Println("Error handling message:", err)
 					return
@@ -43,6 +49,35 @@ func (b *WebSocket) SetMessageHandler(handler MessageHandler) {
 	b.onMessage = handler
 }
 
+type opMsg struct {
+	Op      string `json:"op"`
+	RetMsg  string `json:"ret_msg"`
+	Success bool   `json:"success"`
+}
+
+func (b *WebSocket) handlePongMsg(message []byte) bool {
+	if !strings.Contains(string(message), `"pong"`) {
+		return false
+	}
+	var msg opMsg
+	err := json.Unmarshal(message, &msg)
+	if err != nil {
+		fmt.Println("Error unmarshal:", err)
+		return false
+	}
+	switch msg.Op {
+	case "pong":
+		b.lastPongTime.Store(time.Now().UnixMilli())
+		return true
+	case "ping":
+		if msg.RetMsg == "pong" && msg.Success == true {
+			b.lastPongTime.Store(time.Now().UnixMilli())
+			return true
+		}
+	}
+	return false
+}
+
 type WebSocket struct {
 	conn         *websocket.Conn
 	url          string
@@ -54,6 +89,10 @@ type WebSocket struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	isConnected  *atomic.Bool
+	lastPingTime *atomic.Int64
+	lastPongTime *atomic.Int64
+
+	writeMu sync.Mutex
 }
 
 type WebsocketOption func(*WebSocket)
@@ -78,6 +117,8 @@ func NewBybitPrivateWebSocket(url, apiKey, apiSecret string, handler MessageHand
 		maxAliveTime: "",
 		pingInterval: 20,
 		onMessage:    handler,
+		lastPingTime: &atomic.Int64{},
+		lastPongTime: &atomic.Int64{},
 		isConnected:  &atomic.Bool{},
 	}
 
@@ -94,6 +135,8 @@ func NewBybitPublicWebSocket(url string, handler MessageHandler) *WebSocket {
 		url:          url,
 		pingInterval: 20, // default is 20 seconds
 		onMessage:    handler,
+		lastPingTime: &atomic.Int64{},
+		lastPongTime: &atomic.Int64{},
 		isConnected:  &atomic.Bool{},
 	}
 
@@ -101,6 +144,10 @@ func NewBybitPublicWebSocket(url string, handler MessageHandler) *WebSocket {
 }
 
 func (b *WebSocket) Connect(ctx context.Context) error {
+	// reset ping pong status
+	b.lastPingTime.Store(0)
+	b.lastPongTime.Store(0)
+
 	wssUrl := b.url
 	if b.maxAliveTime != "" {
 		wssUrl += "?max_alive_time=" + b.maxAliveTime
@@ -184,7 +231,7 @@ func (b *WebSocket) ping() {
 	if b.pingInterval <= 0 {
 		fmt.Println("Ping interval is set to a non-positive value.")
 		return
-	} // todo handle pong
+	}
 
 	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
 	defer ticker.Stop()
@@ -192,22 +239,24 @@ func (b *WebSocket) ping() {
 	for {
 		select {
 		case <-ticker.C:
-			currentTime := time.Now().Unix()
+			if b.lastPingTime.Load() > b.lastPongTime.Load() {
+				fmt.Println("Stale connection")
+				b.isConnected.Store(false)
+				return
+			}
+
+			currentTime := time.Now().UnixMilli()
 			pingMessage := map[string]string{
 				"op":     "ping",
 				"req_id": fmt.Sprintf("%d", currentTime),
 			}
-			jsonPingMessage, err := json.Marshal(pingMessage)
-			if err != nil {
-				fmt.Println("Failed to marshal ping message:", err)
-				continue
-			}
 
-			if err := b.conn.WriteMessage(websocket.TextMessage, jsonPingMessage); err != nil {
+			if err := b.sendAsJson(pingMessage); err != nil {
 				fmt.Println("Failed to send ping:", err)
 				b.isConnected.Store(false)
 				return
 			}
+			b.lastPingTime.Store(currentTime)
 			fmt.Println("Ping sent with UTC time:", currentTime)
 
 		case <-b.ctx.Done():
@@ -269,5 +318,7 @@ func (b *WebSocket) sendAsJson(v interface{}) error {
 }
 
 func (b *WebSocket) send(message string) error {
+	b.writeMu.Lock()
+	defer b.writeMu.Unlock()
 	return b.conn.WriteMessage(websocket.TextMessage, []byte(message))
 }
