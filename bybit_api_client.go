@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	stdjson "encoding/json"
 	"fmt"
 	"github.com/bybit-exchange/bybit.go.api/models"
 	"io"
@@ -30,11 +31,11 @@ type BybitClientRequest struct {
 }
 
 type ServerResponse struct {
-	RetCode    int         `json:"retCode"`
-	RetMsg     string      `json:"retMsg"`
-	Result     interface{} `json:"result"`
-	RetExtInfo struct{}    `json:"retExtInfo"`
-	Time       int64       `json:"time"`
+	RetCode    int                `json:"retCode"`
+	RetMsg     string             `json:"retMsg"`
+	Result     stdjson.RawMessage `json:"result"`
+	RetExtInfo struct{}           `json:"retExtInfo"`
+	Time       int64              `json:"time"`
 }
 
 func SendRequest(ctx context.Context, opts []RequestOption, r *request, s *BybitClientRequest, err error) ([]byte, error) {
