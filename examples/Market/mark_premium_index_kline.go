@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	bybit "github.com/KyberNetwork/go-bybit"
+	bybit "github.com/bybit-exchange/bybit.go.api"
 )
 
 func main() {

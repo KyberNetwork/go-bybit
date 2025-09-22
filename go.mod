@@ -1,4 +1,4 @@
-module github.com/KyberNetwork/go-bybit
+module github.com/bybit-exchange/bybit.go.api
 
 go 1.21
 
