@@ -15,6 +15,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const staleDurationMs = int64(2_000)
+
 type MessageHandler func(message []byte) error
 
 func (b *WebSocket) handleIncomingMessages() {
@@ -26,7 +28,7 @@ func (b *WebSocket) handleIncomingMessages() {
 			_, message, err := b.conn.ReadMessage()
 			if err != nil {
 				fmt.Println("Error reading:", err)
-				b.isConnected.Store(false)
+				b.Disconnect()
 				return
 			}
 
@@ -239,9 +241,9 @@ func (b *WebSocket) ping() {
 	for {
 		select {
 		case <-ticker.C:
-			if b.lastPingTime.Load() > b.lastPongTime.Load() {
+			if b.lastPingTime.Load() > b.lastPongTime.Load()+staleDurationMs {
 				fmt.Println("Stale connection")
-				b.isConnected.Store(false)
+				b.Disconnect()
 				return
 			}
 
@@ -253,7 +255,7 @@ func (b *WebSocket) ping() {
 
 			if err := b.sendAsJson(pingMessage); err != nil {
 				fmt.Println("Failed to send ping:", err)
-				b.isConnected.Store(false)
+				b.Disconnect()
 				return
 			}
 			b.lastPingTime.Store(currentTime)
